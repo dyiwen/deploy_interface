@@ -1,0 +1,232 @@
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# !!! DO NOT CHANGE THIS FILE !!!
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# The compose file is under management by the service configuration interface.
+# YOUR CHANGES WILL BE LOST by running the script.
+# For additional feature(s):
+#     https://git.infervision.com/u/FDBod
+# (Run `./docker-gen.sh -h` for more information.)
+version: '2.3'
+services:
+  ldap:
+    image: hub.infervision.com/vendor/slapd-dcm4chee:2.4.44-11.0
+    volumes:
+      - /media/tx-deepocean/Data/dcm4chee-arc/ldap:/var/lib/ldap
+      - /media/tx-deepocean/Data/dcm4chee-arc/slapd.d:/etc/ldap/slapd.d
+    ports:
+      - 389:389
+    env_file:
+      - service.d/dcm4chee-arc.env
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  postgres:
+    image: hub.infervision.com/vendor/postgres-dcm4chee:10.0-11
+    volumes:
+      - /media/tx-deepocean/Data/dcm4chee-arc/db:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    env_file:
+      - service.d/dcm4chee-arc.env
+    environment:
+      - TZ=Asia/Harbin
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  arc:
+    image: hub.infervision.com/vendor/dcm4chee-arc-psql:5.11.0
+    volumes:
+      - /media/tx-deepocean/Data/dcm4chee-arc/wildfly:/opt/wildfly/standalone
+      - /media/tx-deepocean/Data/dcm4chee-arc/storage:/storage
+    depends_on:
+      - ldap
+      - postgres
+    ports:
+      - 8080:8080
+      - 8443:8443
+      - 9990:9990
+      - 11112:11112
+      - 2575:2575
+    env_file:
+      - service.d/dcm4chee-arc.env
+    environment:
+      - LDAP_HOST=ldap
+      - POSTGRES_HOST=postgres
+      - WILDFLY_CHOWN=/opt/wildfly/standalone /storage
+      - WILDFLY_WAIT_FOR=ldap:389 postgres:5432
+      - TZ=Asia/Harbin
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  redis:
+    image: hub.infervision.com/vendor/redis:3.2-alpine
+    volumes:
+      - redis_data:/data
+    ports:
+      - 6379:6379
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  ct0:
+    image: hub.infervision.com/stable/ct-dlserver:3.1.6-lsds
+    runtime: nvidia
+    privileged: true
+    volumes:
+      - ./model:/opt/dlserver/model
+      - /media/tx-deepocean/Data:/media/tx-deepocean/Data
+      - /home/tx-deepocean/.gnupg:/root/.gnupg
+      - /var/run/pcscd/pcscd.comm:/var/run/pcscd/pcscd.comm
+      - ./log:/opt/dlserver/log
+      - /media/tx-deepocean/Data/tmp/:/tmp/
+    env_file:
+      - model/dlserver.env
+    environment:
+      - GPU_ID=0
+      - CHANNEL=CT0
+      - MODE=DICOM
+      - DATA_PATH=/media/tx-deepocean/Data
+      - REDIS_HOSTNAME=redis
+      - REDIS_PORT=6379
+      - DCM4CHEE_HOST=arc
+      - DCM4CHEE_PORT=11112
+      - LSDS_HOST=172.20.123.13
+      - LSDS_PORT=5001
+      - TZ=Asia/Harbin
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  ct1:
+    image: hub.infervision.com/stable/ct-dlserver:3.1.6-lsds
+    runtime: nvidia
+    privileged: true
+    volumes:
+      - ./model:/opt/dlserver/model
+      - /media/tx-deepocean/Data:/media/tx-deepocean/Data
+      - /home/tx-deepocean/.gnupg:/root/.gnupg
+      - /var/run/pcscd/pcscd.comm:/var/run/pcscd/pcscd.comm
+      - ./log:/opt/dlserver/log
+      - /media/tx-deepocean/Data/tmp/:/tmp/
+    env_file:
+      - model/dlserver.env
+    environment:
+      - GPU_ID=1
+      - CHANNEL=CT1
+      - MODE=DICOM
+      - DATA_PATH=/media/tx-deepocean/Data
+      - REDIS_HOSTNAME=redis
+      - REDIS_PORT=6379
+      - DCM4CHEE_HOST=arc
+      - DCM4CHEE_PORT=11112
+      - LSDS_HOST=172.20.123.13
+      - LSDS_PORT=5001
+      - TZ=Asia/Harbin
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  mongo:
+    image: hub.infervision.com/vendor/mongo:3.4
+    command: mongod --storageEngine=wiredTiger
+    volumes:
+      - ohif_db_1:/data/db
+    ports:
+      - 27017:27017
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  viewer:
+    image: hub.infervision.com/dev/ohif-viewer:2.1.0
+    links:
+      - arc
+      - mongo
+    ports:
+      - 3000:3000
+    env_file:
+      - service.d/ohif-viewer.env
+    environment:
+      - MONGO_URL=mongodb://mongo:27017/test
+      - ROOT_URL=http://127.0.0.1:3000
+      - PORT=3000
+      - TZ=Asia/Harbin
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  redir:
+    image: hub.infervision.com/dev/ohif-redir:1.3.1-alpha2
+    volumes:
+      - ohif_logroot:/usr/src/app/log
+    ports:
+      - 3600:3600
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - OHIF_BASE_URL=http://172.20.123.13:3000
+      - OHIF_STAT=D0|D1|D2|D3|D4|D5|D6|D7|D8|D9|D10|D11|D12|D13|D14|D0+7D|D0+14D|D0+30D|D0+90D|D0+183D|D0+365D
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - TIMEZONE=Asia/Harbin
+      - TZ=Asia/Harbin
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+  rdp:
+    image: hub.infervision.com/dev/rdp:1.0.1-hotfix
+    privileged: true
+    shm_size: 2gb
+    volumes:
+      - rdp_home:/home
+      - rdp_etc:/opt/etc
+    ports:
+      - 3388:3388
+      - 3389:3389
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "10"
+volumes:
+  redis_data:
+    driver: local
+  ohif_db_1:
+    driver: local
+  ohif_logroot:
+    driver: local
+  rdp_home:
+    driver: local
+  rdp_etc:
+    driver: local
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: "172.31.0.1/24"
+          gateway: "172.31.0.1"
